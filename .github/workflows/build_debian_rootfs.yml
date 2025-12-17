@@ -1,19 +1,14 @@
 name: Build Debian ARM Root Filesystems (Matrix Parallel)
 
 on:
-  # 手动触发工作流
   workflow_dispatch:
 
 jobs:
-  # ====================================================================
-  # JOB 1: 并行构建所有架构 RootFS
-  # ====================================================================
   build_rootfs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
-    # 核心：定义并行矩阵
+
     strategy:
       fail-fast: false
       matrix:
@@ -32,51 +27,50 @@ jobs:
       - name: 2. Install dependencies (debootstrap + QEMU)
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap tar curl wget qemu-user-static
+          sudo apt-get install -y debootstrap tar curl wget qemu-user-static e2fsprogs
 
       - name: 3. Build Debian ${{ matrix.arch }} rootfs (Stage 1)
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           mkdir -p "$ROOTFS_DIR"
-
-          # Stage 1: 下载和提取包（包含所有必需的 sysvinit 核心组件和工具）
           sudo debootstrap --verbose --arch=${{ matrix.arch }} \
-            --include=dropbear,nano,wget,curl,locales \
+            --include=dropbear,nano,wget,curl,locales,chrony \
             --foreign \
             stretch "$ROOTFS_DIR" http://mirrors.aliyun.com/debian-archive/debian
 
           # DNS 配置
           echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" | sudo tee "$ROOTFS_DIR/etc/resolv.conf"
 
-          # Sources.list
-          echo "deb http://mirrors.aliyun.com/debian-archive/debian stretch main contrib non-free non-free-firmware" \
+          # sources.list
+          echo "deb http://mirrors.aliyun.com/debian-archive/debian stretch main contrib non-free" \
             | sudo tee "$ROOTFS_DIR/etc/apt/sources.list"
 
-      - name: 4. Run Stage 2 inside chroot (via QEMU) & Configure System ⚙️
+      - name: 4. Run Stage 2 inside chroot (via QEMU) & Configure System
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
-          # 复制 QEMU 二进制文件到目标系统
           sudo cp /usr/bin/${{ matrix.qemu_binary }} "$ROOTFS_DIR/usr/bin/"
 
-          # 挂载必需的虚拟文件系统 (chroot 前)
           sudo mount -t proc /proc "$ROOTFS_DIR/proc"
           sudo mount --rbind /sys "$ROOTFS_DIR/sys"
+          sudo mount --make-rslave "$ROOTFS_DIR/sys"
           sudo mount --rbind /dev "$ROOTFS_DIR/dev"
+          sudo mount --make-rslave "$ROOTFS_DIR/dev"
 
-          # Stage 2: 完成包配置
+          # Stage 2
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
-          
-          # ------------------------------------------------------------------
-          # 🌟 自定义系统配置
-          # ------------------------------------------------------------------
-          echo "--- Running custom configurations inside chroot ---"
-          
-          # 1. 设置 root 初始密码为 'debian888'
+
+          # 拷贝工具脚本和 bootargs_input.txt
+          sudo install -d "$ROOTFS_DIR/usr/local/bin"
+          sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/usr/local/bin/local-resize2fs.sh"
+          sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
+          sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
+
+          # 设置 root 密码
           sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian888" | chpasswd'
-                    
-          # 2. 生成 Locales (支持中文和 UTF-8)
+
+          # locales
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
             echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen
@@ -84,71 +78,55 @@ jobs:
             update-locale LANG=en_US.UTF-8
           '
 
-          # ------------------------------------------------------------------
-          # 3. 配置 Chrony NTP 服务器 (新增/修改)
-          # ------------------------------------------------------------------
-          
-          # 5a. 注释掉所有默认的 NTP pool 和 server
-          # 🎯 采用最通用的方案：匹配行首（含空格/Tab）的 "pool" 或 "server" 指令。
-          # 匹配并注释掉所有以 "pool" 开头且前面可有空格的行
+          # chrony 配置
           sudo sed -i '/^[[:space:]]*pool/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
-          # 匹配并注释掉所有以 "server" 开头且前面可有空格的行
           sudo sed -i '/^[[:space:]]*server/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
-
-          # 5b. 创建 tencent.conf 并写入配置
-          # 新增的腾讯 NTP 服务器配置
+          echo "include /etc/chrony/conf.d/*.conf" | sudo tee -a "$ROOTFS_DIR/etc/chrony/chrony.conf"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             mkdir -p /etc/chrony/conf.d
-            echo "server ntp.tencent.com iburst" > /etc/chrony/conf.d/tencent.conf
-            echo "server ntp1.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-            echo "server ntp2.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-            echo "server ntp3.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-            echo "server ntp4.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-            echo "server ntp5.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-          '
-          
-          echo "--- Custom configurations finished ---"
-          # ------------------------------------------------------------------
-          
-          # ------------------------------------------------------------------
-          # 🧹 清理 APT 缓存和临时文件 (消除非确定性和减小体积)
-          # ------------------------------------------------------------------
-          echo "--- Cleaning up APT cache and temporary files ---"
-          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            apt-get clean
-            rm -rf /var/log/*
-            rm -rf /tmp/*
+            for i in "" 1 2 3 4 5; do
+              echo "server ntp${i:+$i}.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
+            done
           '
 
-          # 卸载虚拟文件系统 (chroot 后)
+          # 清理
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            apt-get clean
+            rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+          '
+
           sudo umount -lf "$ROOTFS_DIR/proc" || true
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
-      - name: 5. Cleanup & Pack RootFS
+      - name: 5. Create 1GB ext4 RootFS image + compress
         id: tar
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
-          # 清理 QEMU 二进制文件
-          sudo rm "$ROOTFS_DIR/usr/bin/${{ matrix.qemu_binary }}"
+          set -e
+          IMG_NAME=debian-${{ matrix.arch }}-rootfs.img
+          IMG_SIZE=1G
+          IMG_UUID=0232C92B598E4A2AA9DB8348EC69C7E4
 
-          # 打包
-          TARBALL_NAME=debian-${{ matrix.arch }}-rootfs.tar.gz
-          sudo tar -czf "$TARBALL_NAME" -C "$ROOTFS_DIR" .
+          truncate -s $IMG_SIZE $IMG_NAME
+          mkfs.ext4 -F -U $IMG_UUID -L rootfs $IMG_NAME
 
-          echo "TARBALL_NAME=$TARBALL_NAME" >> $GITHUB_OUTPUT
+          mkdir -p /mnt/rootfs
+          sudo mount -o loop $IMG_NAME /mnt/rootfs
+          sudo cp -a $ROOTFS_DIR/. /mnt/rootfs/
+          sudo umount /mnt/rootfs
+          rmdir /mnt/rootfs
 
-      - name: 6. Upload RootFS Artifact
+          tar -czf ${IMG_NAME}.tar.gz $IMG_NAME
+          echo "TARBALL_NAME=${IMG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: 6. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
-          # 每个架构上传一个独立的 Artifact
           name: debian-rootfs-${{ matrix.arch }}
           path: ${{ steps.tar.outputs.TARBALL_NAME }}
 
-  # ====================================================================
-  # JOB 2: 创建 Release（收集所有 Artifacts）
-  # ====================================================================
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -157,22 +135,22 @@ jobs:
       contents: write
 
     steps:
-      - name: 1. Download all artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./release_artifacts
 
-      - name: 2. Flatten artifact directories
+      - name: Flatten artifact directories
         run: |
           find ./release_artifacts -name "*.tar.gz" -exec mv {} ./release_artifacts/ \;
           find ./release_artifacts -type d -empty -delete
           ls -lh ./release_artifacts
 
-      - name: 3. Generate release tag
+      - name: Generate release tag
         id: date
         run: echo "RELEASE_TAG=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
 
-      - name: 4. Create GitHub Release + upload assets
+      - name: Create GitHub Release + upload assets
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
