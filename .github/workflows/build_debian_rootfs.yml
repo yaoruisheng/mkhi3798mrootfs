@@ -69,6 +69,9 @@ jobs:
 
           # 设置 root 密码
           sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian888" | chpasswd'
+          
+          # 配置网络
+          echo -e "auto eth0\nallow-hotplug eth0\niface eth0 inet dhcp" | sudo tee "$ROOTFS_DIR/etc/network/interfaces.d/eth0.cfg" > /dev/null
 
           # locales
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
