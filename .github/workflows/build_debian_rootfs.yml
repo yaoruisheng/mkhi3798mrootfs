@@ -107,7 +107,7 @@ jobs:
           set -e
           IMG_NAME=debian-${{ matrix.arch }}-rootfs.img
           IMG_SIZE=1G
-          IMG_UUID=0232C92B598E4A2AA9DB8348EC69C7E4
+          IMG_UUID=0232c92b-598e-4a2a-a9db-8348ec69c7e4
 
           truncate -s $IMG_SIZE $IMG_NAME
           mkfs.ext4 -F -U $IMG_UUID -L rootfs $IMG_NAME
