@@ -79,10 +79,13 @@ jobs:
             done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            echo "kernel.printk = 5 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
+          '
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             useradd -m -s /bin/bash user
             echo "user:debian123" | chpasswd
             usermod -aG sudo user
-            echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/user
+            echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
             chmod 0440 /etc/sudoers.d/user
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
