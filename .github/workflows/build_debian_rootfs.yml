@@ -34,54 +34,40 @@ jobs:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           mkdir -p "$ROOTFS_DIR"
-          sudo debootstrap --verbose --arch=${{ matrix.arch }} \
-            --include=dropbear,nano,wget,curl,locales,chrony \
-            --foreign \
-            stretch "$ROOTFS_DIR" http://mirrors.aliyun.com/debian-archive/debian
-
-          # DNS 配置
+          sudo debootstrap --verbose --arch=${{ matrix.arch }} --foreign stretch "$ROOTFS_DIR" http://mirrors.aliyun.com/debian-archive/debian
           echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" | sudo tee "$ROOTFS_DIR/etc/resolv.conf"
-
-          # sources.list
-          echo "deb http://mirrors.aliyun.com/debian-archive/debian stretch main contrib non-free" \
-            | sudo tee "$ROOTFS_DIR/etc/apt/sources.list"
+          echo "deb http://mirrors.aliyun.com/debian-archive/debian stretch main contrib non-free" | sudo tee "$ROOTFS_DIR/etc/apt/sources.list"
 
       - name: 4. Run Stage 2 inside chroot (via QEMU) & Configure System
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           sudo cp /usr/bin/${{ matrix.qemu_binary }} "$ROOTFS_DIR/usr/bin/"
-
           sudo mount -t proc /proc "$ROOTFS_DIR/proc"
           sudo mount --rbind /sys "$ROOTFS_DIR/sys"
           sudo mount --make-rslave "$ROOTFS_DIR/sys"
           sudo mount --rbind /dev "$ROOTFS_DIR/dev"
           sudo mount --make-rslave "$ROOTFS_DIR/dev"
-
-          # Stage 2
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
-
-          # 拷贝工具脚本和 bootargs_input.txt
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
           sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/usr/local/bin/local-resize2fs.sh"
           sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
-
-          # 设置 root 密码
           sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian888" | chpasswd'
-          
-          # 配置网络
           echo -e "auto eth0\nallow-hotplug eth0\niface eth0 inet dhcp" | sudo tee "$ROOTFS_DIR/etc/network/interfaces.d/eth0.cfg" > /dev/null
-
-          # locales
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
-            echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen
+            export DEBIAN_FRONTEND=noninteractive
+            export DEBCONF_NONINTERACTIVE_SEEN=true
+            export LC_ALL=C
+            echo "locales locales/default_environment_locale select en_US.UTF-8" | debconf-set-selections
+            echo "locales locales/locales_to_be_generated multiselect en_US.UTF-8 UTF-8, zh_CN.UTF-8 UTF-8" | debconf-set-selections
+            echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
+            echo "tzdata tzdata/Zones/Asia select Shanghai" | debconf-set-selections
+            apt-get update
+            apt-get install -y locales tzdata chrony dropbear
             locale-gen
             update-locale LANG=en_US.UTF-8
           '
-
-          # chrony 配置
           sudo sed -i '/^[[:space:]]*pool/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
           sudo sed -i '/^[[:space:]]*server/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
           echo "include /etc/chrony/conf.d/*.conf" | sudo tee -a "$ROOTFS_DIR/etc/chrony/chrony.conf"
@@ -91,37 +77,31 @@ jobs:
               echo "server ntp${i:+$i}.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
             done
           '
-
-          # 清理
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
           '
-
           sudo umount -lf "$ROOTFS_DIR/proc" || true
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
-      - name: 5. Create 1GB ext4 RootFS image + compress
+      - name: 5. Create 512MB ext4 RootFS image + compress
         id: tar
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           set -e
           IMG_NAME=debian-${{ matrix.arch }}-rootfs.img
-          IMG_SIZE=1G
+          IMG_SIZE=512M
           IMG_UUID=0232c92b-598e-4a2a-a9db-8348ec69c7e4
           MNT_DIR=${{ github.workspace }}/mnt-rootfs-${{ matrix.arch }}
-
           truncate -s $IMG_SIZE $IMG_NAME
           mkfs.ext4 -F -U $IMG_UUID -L rootfs $IMG_NAME
-
           mkdir -p $MNT_DIR
           sudo mount -o loop $IMG_NAME $MNT_DIR
           sudo cp -a $ROOTFS_DIR/. $MNT_DIR/
           sudo umount $MNT_DIR
           rmdir $MNT_DIR
-
           tar -czf ${IMG_NAME}.tar.gz $IMG_NAME
           echo "TARBALL_NAME=${IMG_NAME}.tar.gz" >> $GITHUB_OUTPUT
 
