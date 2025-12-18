@@ -43,6 +43,7 @@ jobs:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           sudo cp /usr/bin/${{ matrix.qemu_binary }} "$ROOTFS_DIR/usr/bin/"
+          echo "localhost" | sudo tee "$ROOTFS_DIR/etc/hostname" 
           sudo mount -t proc /proc "$ROOTFS_DIR/proc"
           sudo mount --rbind /sys "$ROOTFS_DIR/sys"
           sudo mount --make-rslave "$ROOTFS_DIR/sys"
@@ -53,8 +54,8 @@ jobs:
           sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/usr/local/bin/local-resize2fs.sh"
           sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
-          sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian888" | chpasswd'
-          echo -e "auto eth0\nallow-hotplug eth0\niface eth0 inet dhcp" | sudo tee "$ROOTFS_DIR/etc/network/interfaces.d/eth0.cfg" > /dev/null
+          sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian123" | chpasswd'
+          echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp" | sudo tee "$ROOTFS_DIR/etc/network/interfaces.d/eth0.cfg" > /dev/null
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             export DEBIAN_FRONTEND=noninteractive
             export DEBCONF_NONINTERACTIVE_SEEN=true
@@ -64,7 +65,7 @@ jobs:
             echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
             echo "tzdata tzdata/Zones/Asia select Shanghai" | debconf-set-selections
             apt-get update
-            apt-get install -y locales tzdata chrony dropbear
+            apt-get install -y locales tzdata chrony dropbear sudo
             locale-gen
             update-locale LANG=en_US.UTF-8
           '
@@ -76,6 +77,13 @@ jobs:
             for i in "" 1 2 3 4 5; do
               echo "server ntp${i:+$i}.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
             done
+          '
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            useradd -m -s /bin/bash user
+            echo "user:debian123" | chpasswd
+            usermod -aG sudo user
+            echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/user
+            chmod 0440 /etc/sudoers.d/user
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
@@ -151,5 +159,7 @@ jobs:
             - **ARMEL**（armv5/armv6 软浮点）
 
             **系统配置要点:**
-            - **Root 初始密码：debian888** 🚨 (请在首次登录后立即修改!)
+            - **root 初始密码：debian123** 🚨
+            - **user 初始密码：debian123** 🚨 
+            - (请在首次登录后立即修改!)
           files: ./release_artifacts/*.tar.gz
