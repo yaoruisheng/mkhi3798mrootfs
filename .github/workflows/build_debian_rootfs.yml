@@ -90,8 +90,9 @@ jobs:
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
-            rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+            rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
           '
+          sudo rm -f "$ROOTFS_DIR/usr/bin/${{ matrix.qemu_binary }}"
           sudo umount -lf "$ROOTFS_DIR/proc" || true
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
