@@ -51,11 +51,13 @@ jobs:
           sudo mount --make-rslave "$ROOTFS_DIR/dev"
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
-          sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/usr/local/bin/local-resize2fs.sh"
           sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
+          sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/root/local-resize2fs.sh"
+          sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
+          sudo install -m 0755 tools/resize2fs "$ROOTFS_DIR/root/resize2fs"
           sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian123" | chpasswd'
-          echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp" | sudo tee "$ROOTFS_DIR/etc/network/interfaces.d/eth0.cfg" > /dev/null
+          echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n\nsource /etc/network/interfaces.d/*" | sudo tee "$ROOTFS_DIR/etc/network/interfaces" > /dev/null
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             export DEBIAN_FRONTEND=noninteractive
             export DEBCONF_NONINTERACTIVE_SEEN=true
