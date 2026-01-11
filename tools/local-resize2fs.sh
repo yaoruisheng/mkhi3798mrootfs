@@ -1,23 +1,35 @@
 #!/bin/bash
-if [ ! -f /etc/first_init ]; then
-	rootfs_partition=/dev/$(lsblk -l|grep /|awk '{print $1}')
-	logger -t "resize-disk[$$]" "resizing $rootfs_partition"
-    if [ "$(echo $rootfs_partition | grep "mmc")" = "" ];then
-        rootfs_disk=$(echo "$rootfs_partition" |sed -E -e 's/^(.*)[0-9]+/\1/g')
+set -e
+
+FIRST_INIT=/root/first_init
+
+if [ ! -f "$FIRST_INIT" ]; then
+    # 获取根分区
+    rootfs_partition=$(findmnt -n -o SOURCE /)
+
+    # 分离磁盘和分区号
+    if [[ "$rootfs_partition" =~ mmcblk[0-9]+p[0-9]+ ]]; then
+        rootfs_disk="${rootfs_partition%%p*}"
+        rootfs_partition_num="${rootfs_partition##*p}"
     else
-        rootfs_disk=$(echo "$rootfs_partition" |sed -E -e 's/^(.*)p[0-9]+/\1/g')
+        rootfs_disk="${rootfs_partition%%[0-9]*}"
+        rootfs_partition_num="${rootfs_partition##*[!0-9]}"
     fi
 
-    if [ "$rootfs_disk" = "mmcblk0" ]; then
-        resize2fs $rootfs_partition 2>&1 > /dev/null
-    else
-        rootfs_partition_num=$(echo "$rootfs_partition" |sed -E -e 's/^.*([0-9]+)/\1/g')
-        startfrom=$(fdisk -l ${rootfs_disk} -o device,start|grep ${rootfs_partition}|awk '{print $2}')
-        #lastsector=$(fdisk -l ${rootfs_disk} -o device,end|grep ${rootfs_partition}|awk '{print $2}')
-        (echo d; echo $rootfs_partition_num; echo n; echo p; echo $rootfs_partition_num; echo $startfrom; echo ; echo p; echo w;) | fdisk $rootfs_disk
-        sync
-        resize2fs $rootfs_partition
+    # 仅当磁盘有分区表时，才尝试扩展分区
+    if sfdisk -d "$rootfs_disk" >/dev/null 2>&1; then
+        if [ -x /root/growpart ]; then
+            /root/growpart "$rootfs_disk" "$rootfs_partition_num" || true
+        fi
     fi
-    logger -t "resize-disk[$$]" "resized $rootfs_partition"
+
+    # 扩展文件系统
+    if [ -x /root/resize2fs ]; then
+        /root/resize2fs "$rootfs_partition"
+    fi
+
+    # 标记首次初始化完成
+    touch "$FIRST_INIT"
 fi
+
 exit 0
