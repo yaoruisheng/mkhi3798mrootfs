@@ -81,7 +81,7 @@ jobs:
             done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            echo "kernel.printk = 5 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
+            echo "kernel.printk = 3 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             useradd -m -s /bin/bash user
