@@ -81,7 +81,7 @@ jobs:
             done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            echo "kernel.printk = 3 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
+            echo "kernel.printk = 5 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             useradd -m -s /bin/bash user
@@ -105,7 +105,7 @@ jobs:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
           set -e
-          IMG_NAME=debian-${{ matrix.arch }}-rootfs.img
+          IMG_NAME=debian9-${{ matrix.arch }}-rootfs.img
           IMG_SIZE=512M
           IMG_UUID=0232c92b-598e-4a2a-a9db-8348ec69c7e4
           MNT_DIR=${{ github.workspace }}/mnt-rootfs-${{ matrix.arch }}
@@ -122,7 +122,7 @@ jobs:
       - name: 6. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: debian-rootfs-${{ matrix.arch }}
+          name: debian9-rootfs-${{ matrix.arch }}
           path: ${{ steps.tar.outputs.TARBALL_NAME }}
 
   release:
@@ -154,9 +154,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.date.outputs.RELEASE_TAG }}
-          name: Debian ARM RootFS Build ${{ steps.date.outputs.RELEASE_TAG }}
+          name: Debian9 ARM RootFS Build ${{ steps.date.outputs.RELEASE_TAG }}
           body: |
-            ## 🚀 自动生成的 Debian ARM Root Filesystem
+            ## 🚀 自动生成的 Debian9 ARM Root Filesystem
 
             包含以下架构的最小化 RootFS：
 
