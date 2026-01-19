@@ -1,4 +1,4 @@
-name: Build Debian ARM Root Filesystems (Matrix Parallel)
+name: Build Debian9 ARM Root Filesystems (Matrix Parallel)
 
 on:
   workflow_dispatch:
