@@ -47,6 +47,12 @@ jobs:
           sudo mount --rbind /dev "$ROOTFS_DIR/dev"
           sudo mount --make-rslave "$ROOTFS_DIR/dev"
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
+          sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:ubuntu123" | chpasswd'
+          echo "Install locales tzdata dropbear sudo"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            apt-get update
+            apt-get install -y locales tzdata dropbear sudo
+          '          
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
           sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
@@ -54,33 +60,19 @@ jobs:
           sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
           sudo install -m 0755 tools/resize2fs "$ROOTFS_DIR/root/resize2fs"
           sudo install -m 0644 files/01-all-eth.yaml "$ROOTFS_DIR/etc/netplan/01-all-eth.yaml"
-          sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:ubuntu123" | chpasswd'
+          echo "Enable systemd-networkd"
           chroot "$ROOTFS_DIR" /bin/bash -c '
-            systemctl enable systemd-networkd
-            systemctl enable systemd-resolved
+            ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/dbus-org.freedesktop.network1.service
+            ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/multi-user.target.wants/systemd-networkd.service
+            ln -sf /lib/systemd/system/systemd-networkd.socket /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+            ln -sf /lib/systemd/system/systemd-networkd-wait-online.service /etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service
             ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
           '
+          echo "Locale-gen"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             export DEBIAN_FRONTEND=noninteractive
-            export DEBCONF_NONINTERACTIVE_SEEN=true
-            export LC_ALL=C
-            echo "locales locales/default_environment_locale select en_US.UTF-8" | debconf-set-selections
-            echo "locales locales/locales_to_be_generated multiselect en_US.UTF-8 UTF-8, zh_CN.UTF-8 UTF-8" | debconf-set-selections
-            echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
-            echo "tzdata tzdata/Zones/Asia select Shanghai" | debconf-set-selections
-            apt-get update
-            apt-get install -y locales tzdata chrony dropbear sudo
-            locale-gen
+            locale-gen en_US.UTF-8 zh_CN.UTF-8
             update-locale LANG=en_US.UTF-8
-          '
-          sudo sed -i '/^[[:space:]]*pool/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
-          sudo sed -i '/^[[:space:]]*server/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
-          echo "include /etc/chrony/conf.d/*.conf" | sudo tee -a "$ROOTFS_DIR/etc/chrony/chrony.conf"
-          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            mkdir -p /etc/chrony/conf.d
-            for i in "" 1 2 3 4 5; do
-              echo "server ntp${i:+$i}.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
-            done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             echo "kernel.printk = 3 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
