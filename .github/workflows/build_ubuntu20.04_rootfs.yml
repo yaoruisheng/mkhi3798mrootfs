@@ -61,11 +61,9 @@ jobs:
           sudo install -m 0755 tools/resize2fs "$ROOTFS_DIR/root/resize2fs"
           sudo install -m 0644 files/01-all-eth.yaml "$ROOTFS_DIR/etc/netplan/01-all-eth.yaml"
           echo "Enable systemd-networkd"
-          chroot "$ROOTFS_DIR" /bin/bash -c '
-            ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/dbus-org.freedesktop.network1.service
-            ln -sf /lib/systemd/system/systemd-networkd.service /etc/systemd/system/multi-user.target.wants/systemd-networkd.service
-            ln -sf /lib/systemd/system/systemd-networkd.socket /etc/systemd/system/sockets.target.wants/systemd-networkd.socket
-            ln -sf /lib/systemd/system/systemd-networkd-wait-online.service /etc/systemd/system/network-online.target.wants/systemd-networkd-wait-online.service
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            systemctl enable systemd-networkd
+            systemctl enable systemd-resolved
             ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
           '
           echo "Locale-gen"
