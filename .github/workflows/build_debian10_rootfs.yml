@@ -81,7 +81,7 @@ jobs:
             done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            echo "kernel.printk = 5 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
+            echo "kernel.printk = 3 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             useradd -m -s /bin/bash user
@@ -90,17 +90,43 @@ jobs:
             echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
             chmod 0440 /etc/sudoers.d/user
           '
+          echo "install old systemd-udevd"
+          wget -O libudev1.deb https://archive.debian.org/debian/pool/main/s/systemd/libudev1_232-25+deb9u12_${{ matrix.arch }}.deb
+          wget -O udev.deb https://archive.debian.org/debian/pool/main/s/systemd/udev_232-25+deb9u12_${{ matrix.arch }}.deb
+          sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            dpkg -i /root/libudev1.deb
+            dpkg -i /root/udev.deb
+            apt-mark hold libudev1 udev
+            rm -f /root/libudev1.deb /root/udev.deb
+          '
+          echo "fixed newer systemd running lower kernel 4.4.35"
+          wget -O systemd.deb https://archive.debian.org/debian/pool/main/s/systemd/systemd_232-25+deb9u12_${{ matrix.arch }}.deb
+          mkdir systemd232
+          dpkg-deb -x systemd.deb systemd232
+          sudo install -m 0644 systemd232/lib/systemd/libsystemd-shared-232.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-232.so"
+          sudo install -m 0755 systemd232/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald232"
+          sudo install -m 0755 systemd232/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl232"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
+            ln -s /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
+            mv /usr/bin/journalctl /usr/bin/journalctl-backup
+            ln -s /bin/journalctl232 /usr/bin/journalctl
+          '
+          echo "prepare systemd-guard"
+          echo -e "DPkg::Post-Invoke {\n  \"grep -qE 'systemd' /var/log/dpkg.log && \\ \n   ln -sf /lib/systemd/systemd-journald232 /lib/systemd/systemd-journald && \\  \n   ln -sf /bin/journalctl232 /bin/journalctl && \\ \n   logger -t systemd-guard 'systemd updated, relinked to old version'\";\n};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard" > /dev/null
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
           '
           sudo rm -f "$ROOTFS_DIR/usr/bin/${{ matrix.qemu_binary }}"
+          sudo chroot "$ROOTFS_DIR" sync
           sudo umount -lf "$ROOTFS_DIR/proc" || true
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
       - name: 5. Create 512MB ext4 RootFS image + compress
-        id: tar
+        id: gzip
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
@@ -116,14 +142,14 @@ jobs:
           sudo cp -a $ROOTFS_DIR/. $MNT_DIR/
           sudo umount $MNT_DIR
           rmdir $MNT_DIR
-          tar -czf ${IMG_NAME}.tar.gz $IMG_NAME
-          echo "TARBALL_NAME=${IMG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+          gzip -c $IMG_NAME > ${IMG_NAME}.gz
+          echo "TARBALL_NAME=${IMG_NAME}.gz" >> $GITHUB_OUTPUT
 
       - name: 6. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: debian10-rootfs-${{ matrix.arch }}
-          path: ${{ steps.tar.outputs.TARBALL_NAME }}
+          path: ${{ steps.gzip.outputs.TARBALL_NAME }}
 
   release:
     name: Create GitHub Release
@@ -140,7 +166,7 @@ jobs:
 
       - name: Flatten artifact directories
         run: |
-          find ./release_artifacts -name "*.tar.gz" -exec mv {} ./release_artifacts/ \;
+          find ./release_artifacts -name "*.gz" -exec mv {} ./release_artifacts/ \;
           find ./release_artifacts -type d -empty -delete
           ls -lh ./release_artifacts
 
@@ -168,4 +194,4 @@ jobs:
             - **root 初始密码：debian123** 🚨
             - **user 初始密码：debian123** 🚨 
             - (请在首次登录后立即修改!)
-          files: ./release_artifacts/*.tar.gz
+          files: ./release_artifacts/*.gz
