@@ -113,8 +113,6 @@ jobs:
             mv /usr/bin/journalctl /usr/bin/journalctl-backup
             ln -s /bin/journalctl232 /usr/bin/journalctl
           '
-          echo "prepare systemd-guard"
-          echo -e "DPkg::Post-Invoke {\n  \"grep -qE 'systemd' /var/log/dpkg.log && \\ \n   ln -sf /lib/systemd/systemd-journald232 /lib/systemd/systemd-journald && \\  \n   ln -sf /bin/journalctl232 /bin/journalctl && \\ \n   logger -t systemd-guard 'systemd updated, relinked to old version'\";\n};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard" > /dev/null
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
