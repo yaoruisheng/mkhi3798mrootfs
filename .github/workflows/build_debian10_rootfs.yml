@@ -101,6 +101,7 @@ jobs:
             apt-mark hold libudev1 udev
             rm -f /root/libudev1.deb /root/udev.deb
           '
+          echo -e "Package: libudev1\nPin: version 232-25+deb9u12\nPin-Priority: 1001\n\nPackage: udev\nPin: version 232-25+deb9u12\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
           echo "fixed newer systemd running lower kernel 4.4.35"
           wget -O systemd.deb https://archive.debian.org/debian/pool/main/s/systemd/systemd_232-25+deb9u12_${{ matrix.arch }}.deb
           mkdir systemd232
