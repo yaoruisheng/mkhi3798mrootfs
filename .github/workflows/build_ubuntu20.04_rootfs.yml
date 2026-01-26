@@ -102,7 +102,7 @@ jobs:
           sudo install -m 0755 systemd229/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl229"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
-            ln -s /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
+            ln -s /lib/systemd/systemd-journald229 /usr/lib/systemd/systemd-journald
             mv /usr/bin/journalctl /usr/bin/journalctl-backup
             ln -s /bin/journalctl232 /usr/bin/journalctl
           '
