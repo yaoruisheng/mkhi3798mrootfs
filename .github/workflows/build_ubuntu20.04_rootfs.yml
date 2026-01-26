@@ -32,7 +32,7 @@ jobs:
           ROOTFS_DIR: ${{ github.workspace }}/ubuntu_${{ matrix.arch }}
         run: |
           mkdir -p "$ROOTFS_DIR"
-          sudo debootstrap --verbose --arch=${{ matrix.arch }} --foreign focal "$ROOTFS_DIR" http://mirrors.aliyun.com/ubuntu-ports
+          sudo debootstrap --verbose --arch=${{ matrix.arch }} --foreign focal "$ROOTFS_DIR" https://ports.ubuntu.com/ubuntu-ports
           echo -e "deb http://mirrors.aliyun.com/ubuntu-ports focal main restricted\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-updates main restricted\ndeb http://mirrors.aliyun.com/ubuntu-ports focal universe\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-updates universe\ndeb http://mirrors.aliyun.com/ubuntu-ports focal multiverse\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-updates multiverse\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-backports main restricted universe multiverse\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-security main restricted\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-security universe\ndeb http://mirrors.aliyun.com/ubuntu-ports focal-security multiverse" | sudo tee "$ROOTFS_DIR/etc/apt/sources.list"
 
       - name: 4. Run Stage 2 inside chroot (via QEMU) & Configure System
@@ -54,11 +54,11 @@ jobs:
             apt-get install -y locales tzdata dropbear sudo
           '          
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
-          sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
+          sudo install -m 0755 tools/mkbootargs_${{ matrix.arch }} "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
           sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/root/local-resize2fs.sh"
           sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
-          sudo install -m 0755 tools/resize2fs "$ROOTFS_DIR/root/resize2fs"
+          sudo install -m 0755 tools/resize2fs_${{ matrix.arch }} "$ROOTFS_DIR/root/resize2fs"
           sudo install -m 0644 files/01-all-eth.yaml "$ROOTFS_DIR/etc/netplan/01-all-eth.yaml"
           echo "Enable systemd-networkd"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
@@ -82,6 +82,31 @@ jobs:
             echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
             chmod 0440 /etc/sudoers.d/user
           '
+          echo "install old systemd-udevd"
+          wget -O libudev1.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/libudev1_229-4ubuntu21.31_${{ matrix.arch }}.deb
+          wget -O udev.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/udev_229-4ubuntu21.31_${{ matrix.arch }}.deb
+          sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            apt purge -y libudev1 udev
+            dpkg -i /root/libudev1.deb
+            dpkg -i /root/udev.deb
+            apt-mark hold libudev1 udev
+            rm -f /root/libudev1.deb /root/udev.deb
+          '
+          echo -e "Package: libudev1\nPin: version 229-4ubuntu21.31\nPin-Priority: 1001\n\nPackage: udev\nPin: version 229-4ubuntu21.31\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
+          echo "fixed newer systemd running lower kernel 4.4.35"
+          wget -O systemd.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/systemd_229-4ubuntu21.31_${{ matrix.arch }}.deb
+          mkdir systemd229
+          dpkg-deb -x systemd.deb systemd229
+          sudo install -m 0755 systemd229/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald229"
+          sudo install -m 0755 systemd229/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl229"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
+            ln -s /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
+            mv /usr/bin/journalctl /usr/bin/journalctl-backup
+            ln -s /bin/journalctl232 /usr/bin/journalctl
+          '
+          echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald229 /lib/systemd/systemd-journald && ln -sf /bin/journalctl229 /bin/journalctl && logger -t systemd-guard 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
@@ -92,7 +117,7 @@ jobs:
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
       - name: 5. Create 512MB ext4 RootFS image + compress
-        id: tar
+        id: gzip
         env:
           ROOTFS_DIR: ${{ github.workspace }}/ubuntu_${{ matrix.arch }}
         run: |
@@ -108,14 +133,14 @@ jobs:
           sudo cp -a $ROOTFS_DIR/. $MNT_DIR/
           sudo umount $MNT_DIR
           rmdir $MNT_DIR
-          tar -czf ${IMG_NAME}.tar.gz $IMG_NAME
-          echo "TARBALL_NAME=${IMG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+          gzip -c $IMG_NAME > ${IMG_NAME}.gz
+          echo "TARBALL_NAME=${IMG_NAME}.gz" >> $GITHUB_OUTPUT
 
       - name: 6. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-rootfs-${{ matrix.arch }}
-          path: ${{ steps.tar.outputs.TARBALL_NAME }}
+          path: ${{ steps.gzip.outputs.TARBALL_NAME }}
 
   release:
     name: Create GitHub Release
@@ -132,7 +157,7 @@ jobs:
 
       - name: Flatten artifact directories
         run: |
-          find ./release_artifacts -name "*.tar.gz" -exec mv {} ./release_artifacts/ \;
+          find ./release_artifacts -name "*.gz" -exec mv {} ./release_artifacts/ \;
           find ./release_artifacts -type d -empty -delete
           ls -lh ./release_artifacts
 
@@ -159,4 +184,4 @@ jobs:
             - **root 初始密码：ubuntu123** 🚨
             - **user 初始密码：ubuntu123** 🚨 
             - (请在首次登录后立即修改!)
-          files: ./release_artifacts/*.tar.gz
+          files: ./release_artifacts/*.gz
