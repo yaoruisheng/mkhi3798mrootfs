@@ -51,11 +51,11 @@ jobs:
           sudo mount --make-rslave "$ROOTFS_DIR/dev"
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
-          sudo install -m 0755 tools/mkbootargs "$ROOTFS_DIR/usr/local/bin/mkbootargs"
+          sudo install -m 0755 tools/mkbootargs_${{ matrix.arch }} "$ROOTFS_DIR/usr/local/bin/mkbootargs"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
           sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/root/local-resize2fs.sh"
           sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
-          sudo install -m 0755 tools/resize2fs "$ROOTFS_DIR/root/resize2fs"
+          sudo install -m 0755 tools/resize2fs_${{ matrix.arch }} "$ROOTFS_DIR/root/resize2fs"
           sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian123" | chpasswd'
           echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n\nsource /etc/network/interfaces.d/*" | sudo tee "$ROOTFS_DIR/etc/network/interfaces" > /dev/null
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
@@ -81,7 +81,7 @@ jobs:
             done
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            echo "kernel.printk = 5 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
+            echo "kernel.printk = 3 4 1 7" > /etc/sysctl.d/99-quiet-console.conf
           '
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             useradd -m -s /bin/bash user
@@ -90,17 +90,44 @@ jobs:
             echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
             chmod 0440 /etc/sudoers.d/user
           '
+                                          
+                                                                                                                                                                                                                                        
+                                                                                                                           
+                                                           
+                                                  
+                                      
+                                      
+                                  
+                                       
+                                                   
+           
+                                                                                                                                                                                                                                                                                            
+                                                                
+                                                                                                                                                                                                                                     
+                          
+                                            
+                                                                                                                                     
+                                                                                                                        
+                                                                                            
+                                                  
+                                                                                         
+                                                                                    
+                                                             
+                                                        
+           
+                                                                                                                                                                                                                                                                                                                                                             
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
           '
           sudo rm -f "$ROOTFS_DIR/usr/bin/${{ matrix.qemu_binary }}"
+          sudo chroot "$ROOTFS_DIR" sync
           sudo umount -lf "$ROOTFS_DIR/proc" || true
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
       - name: 5. Create 512MB ext4 RootFS image + compress
-        id: tar
+        id: gzip
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
         run: |
@@ -116,14 +143,14 @@ jobs:
           sudo cp -a $ROOTFS_DIR/. $MNT_DIR/
           sudo umount $MNT_DIR
           rmdir $MNT_DIR
-          tar -czf ${IMG_NAME}.tar.gz $IMG_NAME
-          echo "TARBALL_NAME=${IMG_NAME}.tar.gz" >> $GITHUB_OUTPUT
+          gzip -c $IMG_NAME > ${IMG_NAME}.gz
+          echo "TARBALL_NAME=${IMG_NAME}.gz" >> $GITHUB_OUTPUT
 
       - name: 6. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: debian9-rootfs-${{ matrix.arch }}
-          path: ${{ steps.tar.outputs.TARBALL_NAME }}
+          path: ${{ steps.gzip.outputs.TARBALL_NAME }}
 
   release:
     name: Create GitHub Release
@@ -140,7 +167,7 @@ jobs:
 
       - name: Flatten artifact directories
         run: |
-          find ./release_artifacts -name "*.tar.gz" -exec mv {} ./release_artifacts/ \;
+          find ./release_artifacts -name "*.gz" -exec mv {} ./release_artifacts/ \;
           find ./release_artifacts -type d -empty -delete
           ls -lh ./release_artifacts
 
@@ -168,4 +195,4 @@ jobs:
             - **root 初始密码：debian123** 🚨
             - **user 初始密码：debian123** 🚨 
             - (请在首次登录后立即修改!)
-          files: ./release_artifacts/*.tar.gz
+          files: ./release_artifacts/*.gz
