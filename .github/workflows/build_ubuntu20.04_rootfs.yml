@@ -166,7 +166,7 @@ jobs:
 
       - name: Generate release tag
         id: date
-        run: echo "RELEASE_TAG=v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
+        run: echo "RELEASE_TAG=Ubuntufocal_v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release + upload assets
         uses: softprops/action-gh-release@v1
