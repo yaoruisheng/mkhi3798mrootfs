@@ -50,3 +50,4 @@ dd if=/tmp/bootargs.bin of=/dev/mmcblk0p2 bs=1024 count=1024
 sync
 echo "Restore completed. Rebooting..."
 reboot
+
