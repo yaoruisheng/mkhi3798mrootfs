@@ -83,8 +83,8 @@ jobs:
             chmod 0440 /etc/sudoers.d/user
           '
           echo "install old systemd-udevd"
-          wget -O libudev1.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/libudev1_229-4ubuntu21.31_${{ matrix.arch }}.deb
-          wget -O udev.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/udev_229-4ubuntu21.31_${{ matrix.arch }}.deb
+          wget -O libudev1.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/libudev1_237-3ubuntu10.57_${{ matrix.arch }}.deb
+          wget -O udev.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/udev_237-3ubuntu10.57_${{ matrix.arch }}.deb
           sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             dpkg --purge --force-depends libudev1 udev
@@ -93,18 +93,21 @@ jobs:
             apt-mark hold libudev1 udev
             rm -f /root/libudev1.deb /root/udev.deb
           '
-          echo -e "Package: libudev1\nPin: version 229-4ubuntu21.31\nPin-Priority: 1001\n\nPackage: udev\nPin: version 229-4ubuntu21.31\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
+          echo -e "Package: libudev1\nPin: version 237-3ubuntu10.57\nPin-Priority: 1001\n\nPackage: udev\nPin: version 237-3ubuntu10.57\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
           echo "fixed newer systemd running lower kernel 4.4.35"
-          wget -O systemd.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/systemd_229-4ubuntu21.31_${{ matrix.arch }}.deb
-          mkdir systemd229
-          dpkg-deb -x systemd.deb systemd229
-          sudo install -m 0755 systemd229/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald229"
-          sudo install -m 0755 systemd229/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl229"
+          wget -O systemd.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/systemd_237-3ubuntu10.57_${{ matrix.arch }}.deb
+          mkdir systemd237
+          dpkg-deb -x systemd.deb systemd237
+          sudo install -m 0644 systemd237/lib/systemd/libsystemd-shared-237.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-237.so"
+          sudo install -m 0755 systemd237/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald237"
+          sudo install -m 0755 systemd237/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl237"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
-            ln -s /lib/systemd/systemd-journald229 /usr/lib/systemd/systemd-journald
+            ln -s /lib/systemd/systemd-journald237 /usr/lib/systemd/systemd-journald
             mv /usr/bin/journalctl /usr/bin/journalctl-backup
-            ln -s /bin/journalctl232 /usr/bin/journalctl
+            ln -s /bin/journalctl237 /usr/bin/journalctl
+            mv /usr/bin/systemd-sysusers /usr/bin/systemd-sysusers-backup
+            ln -sf /bin/systemd-sysusers237 /usr/bin/systemd-sysusers
           '
           echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald229 /lib/systemd/systemd-journald && ln -sf /bin/journalctl229 /bin/journalctl && logger -t systemd-guard 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
