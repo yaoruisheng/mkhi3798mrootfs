@@ -87,7 +87,7 @@ jobs:
           wget -O udev.deb https://ports.ubuntu.com/ubuntu-ports/pool/main/s/systemd/udev_229-4ubuntu21.31_${{ matrix.arch }}.deb
           sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            apt purge -y --allow-remove-essential libudev1 udev
+            dpkg --purge --force-depends libudev1 udev
             dpkg -i /root/libudev1.deb
             dpkg -i /root/udev.deb
             apt-mark hold libudev1 udev
