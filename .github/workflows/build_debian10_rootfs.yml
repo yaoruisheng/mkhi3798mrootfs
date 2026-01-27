@@ -91,35 +91,60 @@ jobs:
             echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
             chmod 0440 /etc/sudoers.d/user
           '
-          echo "install old systemd-udevd"
-          wget -O libudev1.deb https://archive.debian.org/debian/pool/main/s/systemd/libudev1_232-25+deb9u12_${{ matrix.arch }}.deb
-          wget -O udev.deb https://archive.debian.org/debian/pool/main/s/systemd/udev_232-25+deb9u12_${{ matrix.arch }}.deb
+      - name: 5. Selective downgrade of systemd components for compatibility
+        env:
+          ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
+        run: |
+          set -e
+          # 1. Architecture-based branching logic
+          if [ "${{ matrix.arch }}" = "armel" ]; then
+            echo "Arch is armel, using legacy systemd 232 from Debian Archive"
+            SYSTEMD_VER="232-25+deb9u12"
+            # Debian 232 存在于 Archive 仓库
+            BASE_URL="https://archive.debian.org/debian/pool/main/s/systemd"
+          else
+            echo "Arch is ${{ matrix.arch }}, using systemd 237 from Ubuntu Ports"
+            SYSTEMD_VER="237-3ubuntu10.57" 
+            BASE_URL="http://ports.ubuntu.com/pool/main/s/systemd"
+          fi
+          # 2. Download packages
+          wget -q -O libudev1.deb "${BASE_URL}/libudev1_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
+          wget -q -O udev.deb "${BASE_URL}/udev_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
+          wget -q -O systemd.deb "${BASE_URL}/systemd_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
+          # 3. Apply core udev downgrade (Prevent systemd-udevd crash on kernel 4.4)
           sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
-          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c "
             dpkg --purge --force-depends libudev1 udev
             dpkg -i /root/libudev1.deb
             dpkg -i /root/udev.deb
             apt-mark hold libudev1 udev
             rm -f /root/libudev1.deb /root/udev.deb
-          '
-          echo -e "Package: libudev1\nPin: version 232-25+deb9u12\nPin-Priority: 1001\n\nPackage: udev\nPin: version 232-25+deb9u12\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
-          echo "fixed newer systemd running lower kernel 4.4.35"
-          wget -O systemd.deb https://archive.debian.org/debian/pool/main/s/systemd/systemd_232-25+deb9u12_${{ matrix.arch }}.deb
-          mkdir systemd232
-          dpkg-deb -x systemd.deb systemd232
-          sudo install -m 0644 systemd232/lib/systemd/libsystemd-shared-232.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-232.so"
-          sudo install -m 0755 systemd232/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald232"
-          sudo install -m 0755 systemd232/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl232"
-          sudo install -m 0755 systemd232/bin/systemd-sysusers "$ROOTFS_DIR/usr/bin/systemd-sysusers232"
-          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
-            mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
-            ln -sf /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
-            mv /usr/bin/journalctl /usr/bin/journalctl-backup
-            ln -sf /bin/journalctl232 /usr/bin/journalctl
-            mv /usr/bin/systemd-sysusers /usr/bin/systemd-sysusers-backup
-            ln -sf /bin/systemd-sysusers232 /usr/bin/systemd-sysusers
-          '
-          echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald232 /lib/systemd/systemd-journald && ln -sf /bin/journalctl232 /bin/journalctl && logger -t systemd-guard 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard"
+          "
+          # 4. Pin versions to prevent accidental 'apt upgrade'
+          echo -e "Package: libudev1\nPin: version $SYSTEMD_VER\nPin-Priority: 1001\n\nPackage: udev\nPin: version $SYSTEMD_VER\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
+          # 5. Extract and deploy compatible binaries (Journald/Sysusers)
+          mkdir -p systemd_extract
+          dpkg-deb -x systemd.deb systemd_extract
+          # 获取主版本号用于文件名 (232 或 237)
+          SO_VER=$(echo $SYSTEMD_VER | cut -d'-' -f1)
+          # 部署共享库和二进制文件
+          sudo install -m 0644 systemd_extract/lib/systemd/libsystemd-shared-${SO_VER}.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-${SO_VER}.so"
+          sudo install -m 0755 systemd_extract/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald${SO_VER}"
+          sudo install -m 0755 systemd_extract/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl${SO_VER}"
+          sudo install -m 0755 systemd_extract/bin/systemd-sysusers "$ROOTFS_DIR/usr/bin/systemd-sysusers${SO_VER}"
+          # 6. Create symbolic links to override system defaults
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c "
+            # Backup original binaries if they exist
+            [ -f /usr/lib/systemd/systemd-journald ] && mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald.bak
+            [ -f /usr/bin/journalctl ] && mv /usr/bin/journalctl /usr/bin/journalctl.bak
+            [ -f /usr/bin/systemd-sysusers ] && mv /usr/bin/systemd-sysusers /usr/bin/systemd-sysusers.bak
+            # Link to compatible versions
+            ln -sf /lib/systemd/systemd-journald${SO_VER} /usr/lib/systemd/systemd-journald
+            ln -sf /bin/journalctl${SO_VER} /usr/bin/journalctl
+            ln -sf /bin/systemd-sysusers${SO_VER} /usr/bin/systemd-sysusers
+          "
+          # 7. Add a DPkg Guard script to maintain links
+          echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald${SO_VER} /lib/systemd/systemd-journald && ln -sf /bin/journalctl${SO_VER} /bin/journalctl && ln -sf /bin/systemd-sysusers${SO_VER} /bin/systemd-sysusers && logger -t systemd-compat 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-compat"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
@@ -130,7 +155,7 @@ jobs:
           sudo umount -lf "$ROOTFS_DIR/sys" || true
           sudo umount -lf "$ROOTFS_DIR/dev" || true
 
-      - name: 5. Create 512MB ext4 RootFS image + compress
+      - name: 6. Create 512MB ext4 RootFS image + compress
         id: gzip
         env:
           ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
@@ -150,7 +175,7 @@ jobs:
           gzip -c $IMG_NAME > ${IMG_NAME}.gz
           echo "TARBALL_NAME=${IMG_NAME}.gz" >> $GITHUB_OUTPUT
 
-      - name: 6. Upload RootFS Image Artifact
+      - name: 7. Upload RootFS Image Artifact
         uses: actions/upload-artifact@v4
         with:
           name: debian10-rootfs-${{ matrix.arch }}
