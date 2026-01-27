@@ -1,4 +1,4 @@
-name: Build Debian10 ARM Root Filesystems (Matrix Parallel)
+name: Build Debian10 ARM Root Filesystems
 
 on:
   workflow_dispatch:
@@ -52,6 +52,7 @@ jobs:
           sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
           sudo install -d "$ROOTFS_DIR/usr/local/bin"
           sudo install -m 0755 tools/mkbootargs_${{ matrix.arch }} "$ROOTFS_DIR/usr/local/bin/mkbootargs"
+          sudo install -m 0755 tools/recoverbackup.sh "$ROOTFS_DIR/usr/bin/recoverbackup"
           sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
           sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/root/local-resize2fs.sh"
           sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
