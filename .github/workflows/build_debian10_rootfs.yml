@@ -97,21 +97,24 @@ jobs:
         run: |
           set -e
           # 1. Architecture-based branching logic
-          if [ "${{ matrix.arch }}" = "armel" ]; then
-            echo "Arch is armel, using legacy systemd 232 from Debian Archive"
-            SYSTEMD_VER="232-25+deb9u12"
-            # Debian 232 存在于 Archive 仓库
-            BASE_URL="https://archive.debian.org/debian/pool/main/s/systemd"
-          else
-            echo "Arch is ${{ matrix.arch }}, using systemd 237 from Ubuntu Ports"
-            SYSTEMD_VER="237-3ubuntu10.57" 
-            BASE_URL="http://ports.ubuntu.com/pool/main/s/systemd"
-          fi
+          #if [ "${{ matrix.arch }}" = "armel" ]; then
+          #  echo "Arch is armel, using legacy systemd 232 from Debian Archive"
+          #  SYSTEMD_VER="232-25+deb9u12"
+          #  # Debian 232 存在于 Archive 仓库
+          #  BASE_URL="https://archive.debian.org/debian/pool/main/s/systemd"
+          #else
+          #  echo "Arch is ${{ matrix.arch }}, using systemd 237 from Ubuntu Ports"
+          #  SYSTEMD_VER="237-3ubuntu10.57" 
+          #  BASE_URL="http://ports.ubuntu.com/pool/main/s/systemd"
+          #fi
+          SYSTEMD_VER="232-25+deb9u12"
+          BASE_URL="https://archive.debian.org/debian/pool/main/s/systemd"
           # 2. Download packages
           wget -q -O libudev1.deb "${BASE_URL}/libudev1_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
           wget -q -O udev.deb "${BASE_URL}/udev_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
           wget -q -O systemd.deb "${BASE_URL}/systemd_${SYSTEMD_VER}_${{ matrix.arch }}.deb"
           # 3. Apply core udev downgrade (Prevent systemd-udevd crash on kernel 4.4)
+          echo "Apply core udev downgrade (Prevent kernel4.4.35 error log)"
           sudo cp libudev1.deb udev.deb "$ROOTFS_DIR/root/"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c "
             dpkg --purge --force-depends libudev1 udev
@@ -123,6 +126,7 @@ jobs:
           # 4. Pin versions to prevent accidental 'apt upgrade'
           echo -e "Package: libudev1\nPin: version $SYSTEMD_VER\nPin-Priority: 1001\n\nPackage: udev\nPin: version $SYSTEMD_VER\nPin-Priority: 1001" | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/udev-pin.pref"
           # 5. Extract and deploy compatible binaries (Journald/Sysusers)
+          echo "Extract and deploy compatible binaries (Journald/Sysusers)"
           mkdir -p systemd_extract
           dpkg-deb -x systemd.deb systemd_extract
           # 获取主版本号用于文件名 (232 或 237)
