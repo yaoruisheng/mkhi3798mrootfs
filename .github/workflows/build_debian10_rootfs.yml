@@ -110,11 +110,14 @@ jobs:
           sudo install -m 0644 systemd232/lib/systemd/libsystemd-shared-232.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-232.so"
           sudo install -m 0755 systemd232/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald232"
           sudo install -m 0755 systemd232/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl232"
+          sudo install -m 0755 systemd232/bin/systemd-sysusers "$ROOTFS_DIR/usr/bin/systemd-sysusers232"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald-backup
-            ln -s /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
+            ln -sf /lib/systemd/systemd-journald232 /usr/lib/systemd/systemd-journald
             mv /usr/bin/journalctl /usr/bin/journalctl-backup
-            ln -s /bin/journalctl232 /usr/bin/journalctl
+            ln -sf /bin/journalctl232 /usr/bin/journalctl
+            mv /usr/bin/systemd-sysusers /usr/bin/systemd-sysusers-backup
+            ln -sf /bin/systemd-sysusers232 /usr/bin/systemd-sysusers
           '
           echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald232 /lib/systemd/systemd-journald && ln -sf /bin/journalctl232 /bin/journalctl && logger -t systemd-guard 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-guard"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
