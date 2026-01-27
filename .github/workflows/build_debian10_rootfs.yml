@@ -135,20 +135,17 @@ jobs:
           sudo install -m 0644 systemd_extract/lib/systemd/libsystemd-shared-${SO_VER}.so "$ROOTFS_DIR/usr/lib/systemd/libsystemd-shared-${SO_VER}.so"
           sudo install -m 0755 systemd_extract/lib/systemd/systemd-journald "$ROOTFS_DIR/usr/lib/systemd/systemd-journald${SO_VER}"
           sudo install -m 0755 systemd_extract/bin/journalctl "$ROOTFS_DIR/usr/bin/journalctl${SO_VER}"
-          sudo install -m 0755 systemd_extract/bin/systemd-sysusers "$ROOTFS_DIR/usr/bin/systemd-sysusers${SO_VER}"
           # 6. Create symbolic links to override system defaults
           sudo chroot "$ROOTFS_DIR" /bin/bash -c "
             # Backup original binaries if they exist
             [ -f /usr/lib/systemd/systemd-journald ] && mv /usr/lib/systemd/systemd-journald /usr/lib/systemd/systemd-journald.bak
             [ -f /usr/bin/journalctl ] && mv /usr/bin/journalctl /usr/bin/journalctl.bak
-            [ -f /usr/bin/systemd-sysusers ] && mv /usr/bin/systemd-sysusers /usr/bin/systemd-sysusers.bak
             # Link to compatible versions
             ln -sf /lib/systemd/systemd-journald${SO_VER} /usr/lib/systemd/systemd-journald
             ln -sf /bin/journalctl${SO_VER} /usr/bin/journalctl
-            ln -sf /bin/systemd-sysusers${SO_VER} /usr/bin/systemd-sysusers
           "
           # 7. Add a DPkg Guard script to maintain links
-          echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald${SO_VER} /lib/systemd/systemd-journald && ln -sf /bin/journalctl${SO_VER} /bin/journalctl && ln -sf /bin/systemd-sysusers${SO_VER} /bin/systemd-sysusers && logger -t systemd-compat 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-compat"
+          echo -e "DPkg::Post-Invoke {\"if grep -qE 'systemd' /var/log/dpkg.log; then ln -sf /lib/systemd/systemd-journald${SO_VER} /lib/systemd/systemd-journald && ln -sf /bin/journalctl${SO_VER} /bin/journalctl && logger -t systemd-compat 'systemd updated, relinked to old version' || true; fi\";};" | sudo tee "$ROOTFS_DIR/etc/apt/apt.conf.d/99-systemd-compat"
           sudo chroot "$ROOTFS_DIR" /bin/bash -c '
             apt-get clean
             rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
