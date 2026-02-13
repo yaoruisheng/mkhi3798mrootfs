@@ -10,5 +10,5 @@ cp -r etc/linux-systemd/user /lib/systemd/
 cp etc/linux-sysctl/30-syncthing.conf /etc/sysctl.d/
 sysctl -q --system
 cp syncthing /usr/bin/
-systemctl enable syncthing
-systemctl start syncthing
+systemctl enable syncthing@username
+systemctl start syncthing@username
