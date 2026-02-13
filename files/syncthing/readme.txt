@@ -12,3 +12,7 @@ sysctl -q --system
 cp syncthing /usr/bin/
 systemctl enable syncthing@username
 systemctl start syncthing@username
+
+
+
+https://github.com/syncthing/syncthing-android/releases/download/1.23.1/app-release.apk
