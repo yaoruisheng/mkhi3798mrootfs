@@ -1,4 +1,4 @@
-name: 构件原版Debian10镜像
+name: 构建原版Debian10镜像
 
 on:
   workflow_dispatch:
