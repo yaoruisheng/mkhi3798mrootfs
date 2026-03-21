@@ -1,0 +1,10 @@
+[Unit]
+Description=Network LED Indicator
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/net-led.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
