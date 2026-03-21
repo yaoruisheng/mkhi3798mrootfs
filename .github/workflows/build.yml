@@ -1,0 +1,175 @@
+name: 构件原版Debian10镜像
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_rootfs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            qemu_binary: qemu-aarch64-static
+          - arch: armhf
+            qemu_binary: qemu-arm-static
+          - arch: armel
+            qemu_binary: qemu-arm-static
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 2. Install dependencies (debootstrap + QEMU)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap tar curl wget qemu-user-static e2fsprogs
+
+      - name: 3. Build Debian ${{ matrix.arch }} rootfs (Stage 1)
+        env:
+          ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
+        run: |
+          mkdir -p "$ROOTFS_DIR"
+          sudo debootstrap --verbose --arch=${{ matrix.arch }} --foreign buster "$ROOTFS_DIR" http://mirrors.aliyun.com/debian-archive/debian
+          echo -e "nameserver 8.8.8.8\nnameserver 8.8.4.4" | sudo tee "$ROOTFS_DIR/etc/resolv.conf"
+          echo "deb http://mirrors.aliyun.com/debian-archive/debian buster main contrib non-free" | sudo tee "$ROOTFS_DIR/etc/apt/sources.list"
+
+      - name: 4. Run Stage 2 inside chroot (via QEMU) & Configure System
+        env:
+          ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
+        run: |
+          sudo cp /usr/bin/${{ matrix.qemu_binary }} "$ROOTFS_DIR/usr/bin/"
+          echo "localhost" | sudo tee "$ROOTFS_DIR/etc/hostname" 
+          sudo mount -t proc /proc "$ROOTFS_DIR/proc"
+          sudo mount --rbind /sys "$ROOTFS_DIR/sys"
+          sudo mount --make-rslave "$ROOTFS_DIR/sys"
+          sudo mount --rbind /dev "$ROOTFS_DIR/dev"
+          sudo mount --make-rslave "$ROOTFS_DIR/dev"
+          sudo chroot "$ROOTFS_DIR" /debootstrap/debootstrap --second-stage
+          sudo install -d "$ROOTFS_DIR/usr/local/bin"
+          sudo install -m 0755 tools/mkbootargs_${{ matrix.arch }} "$ROOTFS_DIR/usr/local/bin/mkbootargs"
+          sudo install -m 0755 tools/recoverbackup.sh "$ROOTFS_DIR/usr/bin/recoverbackup"
+          sudo install -m 0644 tools/bootargs_input.txt "$ROOTFS_DIR/etc/bootargs_input.txt"
+          sudo install -m 0644 files/00-initctl.conf "$ROOTFS_DIR/etc/sysctl.d/00-initctl.conf"
+          sudo install -m 0755 tools/local-resize2fs.sh "$ROOTFS_DIR/root/local-resize2fs.sh"
+          sudo install -m 0755 tools/growpart "$ROOTFS_DIR/root/growpart"
+          sudo install -m 0755 tools/resize2fs_${{ matrix.arch }} "$ROOTFS_DIR/root/resize2fs"
+          sudo chroot "$ROOTFS_DIR" sh -c 'echo "root:debian123" | chpasswd'
+          echo -e "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n\nsource /etc/network/interfaces.d/*" | sudo tee "$ROOTFS_DIR/etc/network/interfaces" > /dev/null
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            export DEBIAN_FRONTEND=noninteractive
+            export DEBCONF_NONINTERACTIVE_SEEN=true
+            export LC_ALL=C
+            echo "locales locales/default_environment_locale select en_US.UTF-8" | debconf-set-selections
+            echo "locales locales/locales_to_be_generated multiselect en_US.UTF-8 UTF-8, zh_CN.UTF-8 UTF-8" | debconf-set-selections
+            echo "tzdata tzdata/Areas select Asia" | debconf-set-selections
+            echo "tzdata tzdata/Zones/Asia select Shanghai" | debconf-set-selections
+            apt-get update
+            apt-get install -y locales tzdata chrony dropbear sudo
+            locale-gen
+            update-locale LANG=en_US.UTF-8
+          '
+          sudo sed -i '/^[[:space:]]*pool/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
+          sudo sed -i '/^[[:space:]]*server/s/^/#/' "$ROOTFS_DIR/etc/chrony/chrony.conf"
+          echo "include /etc/chrony/conf.d/*.conf" | sudo tee -a "$ROOTFS_DIR/etc/chrony/chrony.conf"
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            mkdir -p /etc/chrony/conf.d
+            for i in "" 1 2 3 4 5; do
+              echo "server ntp${i:+$i}.tencent.com iburst" >> /etc/chrony/conf.d/tencent.conf
+            done
+          '
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            useradd -m -s /bin/bash user
+            echo "user:debian123" | chpasswd
+            usermod -aG sudo user
+            echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/user
+            chmod 0440 /etc/sudoers.d/user
+          '
+      - name: 5. clean & umount
+        env:
+          ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
+        run: |
+          sudo chroot "$ROOTFS_DIR" /bin/bash -c '
+            apt-get clean
+            rm -rf /var/log/* /tmp/* /usr/share/doc/* /usr/share/man/* /usr/share/info/* /var/lib/apt/lists/*
+          '
+          sudo rm -f "$ROOTFS_DIR/usr/bin/${{ matrix.qemu_binary }}"
+          sudo chroot "$ROOTFS_DIR" sync
+          sudo umount -lf "$ROOTFS_DIR/proc" || true
+          sudo umount -lf "$ROOTFS_DIR/sys" || true
+          sudo umount -lf "$ROOTFS_DIR/dev" || true
+
+      - name: 6. Create 512MB ext4 RootFS image + compress
+        id: gzip
+        env:
+          ROOTFS_DIR: ${{ github.workspace }}/debian_${{ matrix.arch }}
+        run: |
+          set -e
+          IMG_NAME=debian10-${{ matrix.arch }}-rootfs.img
+          IMG_SIZE=512M
+          IMG_UUID=0232c92b-598e-4a2a-a9db-8348ec69c7e4
+          MNT_DIR=${{ github.workspace }}/mnt-rootfs-${{ matrix.arch }}
+          truncate -s $IMG_SIZE $IMG_NAME
+          mkfs.ext4 -F -U $IMG_UUID -L rootfs $IMG_NAME
+          mkdir -p $MNT_DIR
+          sudo mount -o loop $IMG_NAME $MNT_DIR
+          sudo cp -a $ROOTFS_DIR/. $MNT_DIR/
+          sudo umount $MNT_DIR
+          rmdir $MNT_DIR
+          gzip -c $IMG_NAME > ${IMG_NAME}.gz
+          echo "TARBALL_NAME=${IMG_NAME}.gz" >> $GITHUB_OUTPUT
+
+      - name: 7. Upload RootFS Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian10-rootfs-${{ matrix.arch }}
+          path: ${{ steps.gzip.outputs.TARBALL_NAME }}
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build_rootfs
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release_artifacts
+
+      - name: Flatten artifact directories
+        run: |
+          find ./release_artifacts -name "*.gz" -exec mv {} ./release_artifacts/ \;
+          find ./release_artifacts -type d -empty -delete
+          ls -lh ./release_artifacts
+
+      - name: Generate release tag
+        id: date
+        run: echo "RELEASE_TAG=Debian10_v$(date +'%Y.%m.%d').${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release + upload assets
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.date.outputs.RELEASE_TAG }}
+          name: Debian10 ARM RootFS Build ${{ steps.date.outputs.RELEASE_TAG }}
+          body: |
+            ## 🚀 自动生成的 Debian10 ARM Root Filesystem
+
+            包含以下架构的最小化 RootFS：
+
+            - **ARM64**（aarch64）
+            - **ARMHF**（armv7 硬浮点）
+            - **ARMEL**（armv5/armv6 软浮点）
+
+            **系统配置要点:**
+            - **root 初始密码：debian123** 🚨
+            - **user 初始密码：debian123** 🚨 
+            - (请在首次登录后立即修改!)
+          files: ./release_artifacts/*.gz
