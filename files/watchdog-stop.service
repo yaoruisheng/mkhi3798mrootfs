@@ -1,0 +1,11 @@
+[Unit]
+Description=Stop watchdog before reboot
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "echo V > /dev/watchdog"
+
+[Install]
+WantedBy=halt.target reboot.target shutdown.target
