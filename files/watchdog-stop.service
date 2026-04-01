@@ -1,3 +1,11 @@
+# nano /etc/systemd/system.conf
+# # 1. 进程不退出？最多等 10 秒就强杀，别等 90 秒
+#   DefaultTimeoutStopSec=10s
+# # 2. 运行时喂狗：每 30 秒喂一次，保证死机能自救
+#   RuntimeWatchdogSec=30s
+# # 3. 关机保底：如果重启流程卡住 20 秒，直接让硬件踢电源
+#   ShutdownWatchdogSec=20s
+
 [Unit]
 Description=Stop watchdog before reboot
 DefaultDependencies=no
